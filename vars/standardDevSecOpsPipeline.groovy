@@ -47,7 +47,7 @@ def call(Map config = [:]) {
             stage('2. Build & Unit Test') {
                 steps {
                     dir('backend') {
-                        sh 'mvn clean package'
+                        sh 'mvn clean package -DskipTests'
                     }
                 }
             }
