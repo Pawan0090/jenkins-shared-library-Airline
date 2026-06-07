@@ -53,6 +53,8 @@ def call(Map config = [:]) {
                     dir('backend') {
                         sh "docker build -t ${config.backendImage}:${env.IMAGE_TAG} ."
                     }
+                    dir('.') { // Go to the absolute root of the project
+                    sh 'find . -name "package.json"' // This will find every package.json in the entire rep
 
                     // Frontend Build with Dynamic Path Detection
                     dir('frontend') {
