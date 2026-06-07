@@ -7,11 +7,37 @@ def call(Map config = [:]) {
         }
 
         tools {
-            maven 'Maven-3.9' 
+            maven 'Maven-3.9'
             jdk 'Java-21'
         }
 
         stages {
+
+            stage('Debug Environment') {
+                steps {
+                    sh '''
+                        echo "===== JAVA ====="
+                        java -version
+
+                        echo "===== JAVAC ====="
+                        javac -version
+
+                        echo "===== MAVEN ====="
+                        mvn -version
+
+                        echo "===== JAVA_HOME ====="
+                        echo $JAVA_HOME
+
+                        echo "===== PATH ====="
+                        echo $PATH
+
+                        which java || true
+                        which javac || true
+                        which mvn || true
+                    '''
+                }
+            }
+
             stage('1. Checkout Code') {
                 steps {
                     checkout scm
@@ -57,6 +83,7 @@ def call(Map config = [:]) {
                     dir('backend') {
                         sh "docker build -t ${config.backendImage}:${env.IMAGE_TAG} ."
                     }
+
                     dir('frontend') {
                         sh "docker build -t ${config.frontendImage}:${env.IMAGE_TAG} ."
                     }
@@ -72,36 +99,49 @@ def call(Map config = [:]) {
 
             stage('8. Gate: Manual Approval') {
                 steps {
-                    input message: "Images tested and scanned. Deploy version ${env.IMAGE_TAG} to Remote Docker Server?", ok: "Deploy Now"
+                    input message: "Images tested and scanned. Deploy version ${env.IMAGE_TAG} to Remote Docker Server?",
+                          ok: "Deploy Now"
                 }
             }
 
             stage('9. Remote Deployment to Docker Server') {
                 steps {
-                    // 1. Push the secure images to Docker Hub
-                    withCredentials([usernamePassword(credentialsId: config.dockerCredsId, passwordVariable: 'DOCKER_PASS', usernameVariable: 'DOCKER_USER')]) {
-                        sh "echo \$DOCKER_PASS | docker login -u \$DOCKER_USER --password-stdin"
+
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: config.dockerCredsId,
+                            usernameVariable: 'DOCKER_USER',
+                            passwordVariable: 'DOCKER_PASS'
+                        )
+                    ]) {
+
+                        sh '''
+                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        '''
+
                         sh "docker push ${config.backendImage}:${env.IMAGE_TAG}"
                         sh "docker push ${config.frontendImage}:${env.IMAGE_TAG}"
                     }
-                    
-                    // 2. SSH into the separate Docker Server and deploy!
+
                     sshagent(['docker-server-ssh']) {
                         sh """
                             ssh -o StrictHostKeyChecking=no ubuntu@${config.dockerServerIp} '
-                                # Pull the latest secure images
                                 docker pull ${config.backendImage}:${env.IMAGE_TAG}
                                 docker pull ${config.frontendImage}:${env.IMAGE_TAG}
-                                
-                                # Stop and remove old containers
+
                                 docker stop aeroflight-backend || true
                                 docker rm aeroflight-backend || true
+
                                 docker stop aeroflight-frontend || true
                                 docker rm aeroflight-frontend || true
-                                
-                                # Run the new containers on the remote server
-                                docker run -d -p 8080:8080 --name aeroflight-backend ${config.backendImage}:${env.IMAGE_TAG}
-                                docker run -d -p 80:80 --name aeroflight-frontend ${config.frontendImage}:${env.IMAGE_TAG}
+
+                                docker run -d -p 8080:8080 \
+                                    --name aeroflight-backend \
+                                    ${config.backendImage}:${env.IMAGE_TAG}
+
+                                docker run -d -p 80:80 \
+                                    --name aeroflight-frontend \
+                                    ${config.frontendImage}:${env.IMAGE_TAG}
                             '
                         """
                     }
