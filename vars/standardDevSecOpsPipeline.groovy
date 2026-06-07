@@ -6,11 +6,6 @@ def call(Map config = [:]) {
             IMAGE_TAG = "v${env.BUILD_ID}"
         }
 
-        tools {
-            maven 'Maven-3.9'
-            jdk 'Java-21'
-        }
-
         stages {
 
             stage('Debug Environment') {
