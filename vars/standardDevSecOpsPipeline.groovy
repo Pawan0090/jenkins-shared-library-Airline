@@ -6,38 +6,7 @@ def call(Map config = [:]) {
             IMAGE_TAG = "v${env.BUILD_ID}"
         }
 
-        tools {
-            maven 'Maven-3.9' 
-             jdk 'Java-21'
-        }
-
         stages {
-
-            stage('Debug Environment') {
-                steps {
-                    sh '''
-                        echo "===== JAVA ====="
-                        java -version
-
-                        echo "===== JAVAC ====="
-                        javac -version
-
-                        echo "===== MAVEN ====="
-                        mvn -version
-
-                        echo "===== JAVA_HOME ====="
-                        echo $JAVA_HOME
-
-                        echo "===== PATH ====="
-                        echo $PATH
-
-                        which java || true
-                        which javac || true
-                        which mvn || true
-                    '''
-                }
-            }
-
             stage('1. Checkout Code') {
                 steps {
                     checkout scm
@@ -80,13 +49,24 @@ def call(Map config = [:]) {
 
             stage('6. Build Docker Images') {
                 steps {
+                    // Backend Build
                     dir('backend') {
                         sh "docker build -t ${config.backendImage}:${env.IMAGE_TAG} ."
                     }
 
+                    // Frontend Build with Dynamic Path Detection
                     dir('frontend') {
-                        sh 'ls -F'
-                        sh "docker build -t ${config.frontendImage}:${env.IMAGE_TAG} ."
+                        // This command finds where package.json is and builds from that directory
+                        sh '''
+                            PKG_DIR=$(find . -name "package.json" -exec dirname {} \\;)
+                            if [ -z "$PKG_DIR" ]; then
+                                echo "ERROR: package.json not found in frontend directory"
+                                exit 1
+                            fi
+                            echo "Found package.json in: $PKG_DIR"
+                            cd "$PKG_DIR"
+                            docker build -t ${config.frontendImage}:${env.IMAGE_TAG} .
+                        '''
                     }
                 }
             }
@@ -107,7 +87,6 @@ def call(Map config = [:]) {
 
             stage('9. Remote Deployment to Docker Server') {
                 steps {
-
                     withCredentials([
                         usernamePassword(
                             credentialsId: config.dockerCredsId,
@@ -115,11 +94,7 @@ def call(Map config = [:]) {
                             passwordVariable: 'DOCKER_PASS'
                         )
                     ]) {
-
-                        sh '''
-                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                        '''
-
+                        sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
                         sh "docker push ${config.backendImage}:${env.IMAGE_TAG}"
                         sh "docker push ${config.frontendImage}:${env.IMAGE_TAG}"
                     }
@@ -129,20 +104,12 @@ def call(Map config = [:]) {
                             ssh -o StrictHostKeyChecking=no ubuntu@${config.dockerServerIp} '
                                 docker pull ${config.backendImage}:${env.IMAGE_TAG}
                                 docker pull ${config.frontendImage}:${env.IMAGE_TAG}
-
                                 docker stop aeroflight-backend || true
                                 docker rm aeroflight-backend || true
-
                                 docker stop aeroflight-frontend || true
                                 docker rm aeroflight-frontend || true
-
-                                docker run -d -p 8080:8080 \
-                                    --name aeroflight-backend \
-                                    ${config.backendImage}:${env.IMAGE_TAG}
-
-                                docker run -d -p 80:80 \
-                                    --name aeroflight-frontend \
-                                    ${config.frontendImage}:${env.IMAGE_TAG}
+                                docker run -d -p 8080:8080 --name aeroflight-backend ${config.backendImage}:${env.IMAGE_TAG}
+                                docker run -d -p 80:80 --name aeroflight-frontend ${config.frontendImage}:${env.IMAGE_TAG}
                             '
                         """
                     }
