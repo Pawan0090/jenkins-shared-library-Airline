@@ -1,84 +1,14 @@
-Skip to content
-Pawan0090
-jenkins-shared-library-Airline
-Repository navigation
-Code
-Issues
-Pull requests
-Agents
-Actions
-Projects
-Wiki
-Security and quality
-Insights
-Settings
-Files
-Go to file
-t
-T
-vars
-standardDevSecOpsPipeline.groovy
-jenkins-shared-library-Airline/vars
-/
-standardDevSecOpsPipeline.groovy
-in
-main
-
-Edit
-
-Preview
-Indent mode
-
-Spaces
-Indent size
-
-4
-Line wrap mode
-
-No wrap
-Editing standardDevSecOpsPipeline.groovy file contents
-  1
-  2
-  3
-  4
-  5
-  6
-  7
-  8
-  9
- 10
- 11
- 12
- 13
- 14
- 15
- 16
- 17
- 18
- 19
- 20
- 21
- 22
- 23
- 24
- 25
- 26
- 27
- 28
- 29
- 30
- 31
- 32
- 33
- 34
- 35
- 36
 def call(Map config = [:]) {
     pipeline {
         agent any
 
         environment {
             IMAGE_TAG = "v${env.BUILD_ID}"
+        }
+
+        tools {
+            maven 'Maven-3.9' 
+            jdk 'Java-21'
         }
 
         stages {
@@ -109,4 +39,80 @@ def call(Map config = [:]) {
             stage('4. Quality Gate') {
                 steps {
                     timeout(time: 5, unit: 'MINUTES') {
-Use Control + Shift + m to toggle the tab key moving focus. Alternatively, use esc then tab to move to the next interactive element on the page.
+                        waitForQualityGate abortPipeline: true
+                    }
+                }
+            }
+
+            stage('5. Trivy FS Dependency Scan') {
+                steps {
+                    dir('backend') {
+                        sh 'trivy fs --severity HIGH,CRITICAL --exit-code 1 .'
+                    }
+                }
+            }
+
+            stage('6. Build Docker Images') {
+                steps {
+                    dir('backend') {
+                        sh "docker build -t ${config.backendImage}:${env.IMAGE_TAG} ."
+                    }
+                    dir('frontend') {
+                        sh '''
+                            PKG_DIR=$(find . -name "package.json" -exec dirname {} \\;)
+                            if [ -z "$PKG_DIR" ]; then
+                                echo "ERROR: package.json not found"
+                                exit 1
+                            fi
+                            docker build -t ${config.frontendImage}:${env.IMAGE_TAG} "$PKG_DIR"
+                        '''
+                    }
+                }
+            }
+
+            stage('7. Trivy Image Scan') {
+                steps {
+                    sh "trivy image --severity HIGH,CRITICAL --exit-code 1 ${config.backendImage}:${env.IMAGE_TAG}"
+                    sh "trivy image --severity HIGH,CRITICAL --exit-code 1 ${config.frontendImage}:${env.IMAGE_TAG}"
+                }
+            }
+
+            stage('8. Gate: Manual Approval') {
+                steps {
+                    input message: "Deploy version ${env.IMAGE_TAG}?", ok: "Deploy Now"
+                }
+            }
+
+            stage('9. Remote Deployment') {
+                steps {
+                    withCredentials([usernamePassword(credentialsId: config.dockerCredsId, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
+                        sh "docker push ${config.backendImage}:${env.IMAGE_TAG}"
+                        sh "docker push ${config.frontendImage}:${env.IMAGE_TAG}"
+                    }
+                    sshagent(['docker-server-ssh']) {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no ubuntu@${config.dockerServerIp} '
+                                docker pull ${config.backendImage}:${env.IMAGE_TAG}
+                                docker pull ${config.frontendImage}:${env.IMAGE_TAG}
+                                docker stop aeroflight-backend || true
+                                docker rm aeroflight-backend || true
+                                docker stop aeroflight-frontend || true
+                                docker rm aeroflight-frontend || true
+                                docker run -d -p 8080:8080 --name aeroflight-backend ${config.backendImage}:${env.IMAGE_TAG}
+                                docker run -d -p 80:80 --name aeroflight-frontend ${config.frontendImage}:${env.IMAGE_TAG}
+                            '
+                        """
+                    }
+                }
+            }
+        }
+        post {
+            always {
+                sh "docker rmi ${config.backendImage}:${env.IMAGE_TAG} || true"
+                sh "docker rmi ${config.frontendImage}:${env.IMAGE_TAG} || true"
+                cleanWs()
+            }
+        }
+    }
+}
