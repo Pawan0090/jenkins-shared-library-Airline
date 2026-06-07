@@ -85,6 +85,7 @@ def call(Map config = [:]) {
                     }
 
                     dir('frontend') {
+                        sh 'ls -F'
                         sh "docker build -t ${config.frontendImage}:${env.IMAGE_TAG} ."
                     }
                 }
