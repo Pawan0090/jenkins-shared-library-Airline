@@ -57,9 +57,9 @@ def call(Map config = [:]) {
                     dir('backend') {
                         sh "docker build -t ${config.backendImage}:${env.IMAGE_TAG} ."
                     }
-                        dir('frontend') {
-                        sh 'docker build -t dockerpawan09/aeroflight-frontend:v${BUILD_NUMBER} .'
-                        }
+                    dir('frontend') {
+                        sh "docker build -t ${config.frontendImage}:${env.IMAGE_TAG} ."
+                    }
                 }
             }
 
