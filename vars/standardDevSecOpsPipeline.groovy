@@ -57,16 +57,9 @@ def call(Map config = [:]) {
                     dir('backend') {
                         sh "docker build -t ${config.backendImage}:${env.IMAGE_TAG} ."
                     }
-                    dir('frontend') {
-                        sh '''
-                            PKG_DIR=$(find . -name "package.json" -exec dirname {} \\;)
-                            if [ -z "$PKG_DIR" ]; then
-                                echo "ERROR: package.json not found"
-                                exit 1
-                            fi
-                            docker build -t ${config.frontendImage}:${env.IMAGE_TAG} "$PKG_DIR"
-                        '''
-                    }
+                        dir('frontend') {
+                        sh 'docker build -t dockerpawan09/aeroflight-frontend:v${BUILD_NUMBER} .'
+                        }
                 }
             }
 
